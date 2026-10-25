@@ -23,6 +23,7 @@
  */
 
 #include <kernel/time/delay.h>
+#include <driver/clocksource/clocksource.h>
 #include <driver/i2c/i2c.h>
 #include <driver/nvmem/nvmem.h>
 
@@ -111,6 +112,20 @@ static int nvmem_at24c02_read(struct nvmem_t * m, void * buf, int offset, int co
 	return length;
 }
 
+static int at24c02_write_wait_ready(struct i2c_device_t * dev, uint8_t reg, uint8_t * buf, int len)
+{
+	ktime_t timeout = ktime_add_ms(ktime_get(), 25);
+	uint8_t rbuf[8];
+
+	len = XMIN(len, 8);
+	do {
+		if(at24c02_read(dev, reg, rbuf, len) && (xos_memcmp(rbuf, buf, len) == 0))
+			return 1;
+		udelay(500);
+	} while(ktime_before(ktime_get(), timeout));
+	return 0;
+}
+
 static int nvmem_at24c02_write(struct nvmem_t * m, void * buf, int offset, int count)
 {
 	struct nvmem_at24c02_pdata_t * pdat = (struct nvmem_at24c02_pdata_t *)m->priv;
@@ -122,11 +137,12 @@ static int nvmem_at24c02_write(struct nvmem_t * m, void * buf, int offset, int c
 		int chunk = XMIN(count, 8 - (offset & 0x7));
 		if(!at24c02_write(pdat->dev, offset, pbuf, chunk))
 			break;
+		if(!at24c02_write_wait_ready(pdat->dev, offset, pbuf, chunk))
+			break;
 		count -= chunk;
 		pbuf += chunk;
 		length += chunk;
 		offset += chunk;
-		mdelay(5);
 	}
 	return length;
 }

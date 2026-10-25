@@ -30,6 +30,50 @@ static ssize_t nvmem_read_capacity(struct kobj_t * kobj, void * buf, size_t size
 	return xos_sprintf(buf, "%d", nvmem_capacity(m));
 }
 
+static ssize_t nvmem_read_dump(struct kobj_t * kobj, void * buf, size_t size)
+{
+	struct nvmem_t * m = (struct nvmem_t *)kobj->priv;
+	int capacity = nvmem_capacity(m);
+	int len = 0;
+	if(capacity > 0)
+	{
+		uint8_t * data = xos_mem_malloc(capacity);
+		if(data)
+		{
+			if(nvmem_read(m, data, 0, capacity) == capacity)
+			{
+				for(int i = 0; i < capacity; i += 16)
+				{
+					if((len + 80) > (int)size)
+						break;
+					len += xos_sprintf((char *)buf + len, "%08x: ", i);
+					for(int j = 0; j < 16; j++)
+					{
+						if((i + j) < capacity)
+							len += xos_sprintf((char *)buf + len, "%02x ", data[i + j]);
+						else
+							len += xos_sprintf((char *)buf + len, "   ");
+					}
+					len += xos_sprintf((char *)buf + len, "|");
+					for(int j = 0; j < 16; j++)
+					{
+						if((i + j) < capacity)
+						{
+							uint8_t c = data[i + j];
+							len += xos_sprintf((char *)buf + len, "%c", xos_isprint(c) ? c : '.');
+						}
+						else
+							len += xos_sprintf((char *)buf + len, " ");
+					}
+					len += xos_sprintf((char *)buf + len, "\r\n");
+				}
+			}
+			xos_mem_free(data);
+		}
+	}
+	return len;
+}
+
 struct nvmem_t * search_nvmem(const char * name)
 {
 	struct device_t * dev;
@@ -70,6 +114,7 @@ struct device_t * register_nvmem(struct nvmem_t * m, struct driver_t * drv)
 	dev->priv = m;
 	dev->kobj = kobj_alloc_directory(dev->name);
 	kobj_add_regular(dev->kobj, "capacity", nvmem_read_capacity, NULL, m);
+	kobj_add_regular(dev->kobj, "dump", nvmem_read_dump, NULL, m);
 
 	if(!register_device(dev))
 	{
